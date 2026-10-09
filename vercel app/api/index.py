@@ -54,4 +54,4 @@ def check(q: Query):
             "avg_uptime": float(up.mean()),
             "breaches": int((lat > q.threshold_ms).sum()),
         }
-    return {"regions": out}
+        return out
