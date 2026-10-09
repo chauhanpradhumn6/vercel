@@ -2,22 +2,31 @@ import json
 from pathlib import Path
 
 import numpy as np
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Request, Response
 from pydantic import BaseModel
 
 app = FastAPI()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["POST", "OPTIONS"],
-    allow_headers=["*"],
-)
+CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "*",
+}
+
+
+@app.middleware("http")
+async def add_cors(request: Request, call_next):
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=CORS_HEADERS)
+    response = await call_next(request)
+    for k, v in CORS_HEADERS.items():
+        response.headers[k] = v
+    return response
+
 
 DATA = json.loads((Path(__file__).parent.parent / "telemetry.json").read_text())
 
-# Adjust these three keys if your bundle uses different names
+# Change these if your file uses different key names
 REGION_KEY, LATENCY_KEY, UPTIME_KEY = "region", "latency_ms", "uptime_pct"
 
 
@@ -46,5 +55,3 @@ def check(q: Query):
             "breaches": int((lat > q.threshold_ms).sum()),
         }
     return {"regions": out}
-
-  
