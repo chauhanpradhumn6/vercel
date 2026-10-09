@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 app = FastAPI()
@@ -11,6 +12,7 @@ CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "*",
+    "Access-Control-Max-Age": "86400",
 }
 
 
@@ -18,7 +20,10 @@ CORS_HEADERS = {
 async def add_cors(request: Request, call_next):
     if request.method == "OPTIONS":
         return Response(status_code=204, headers=CORS_HEADERS)
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception as e:
+        response = JSONResponse({"error": str(e)}, status_code=500)
     for k, v in CORS_HEADERS.items():
         response.headers[k] = v
     return response
@@ -57,4 +62,4 @@ def check(q: Query):
             "avg_uptime": float(up.mean()),
             "breaches": int((lat > q.threshold_ms).sum()),
         }
-    return out
+    return {"regions": out}
