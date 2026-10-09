@@ -26,7 +26,6 @@ async def add_cors(request: Request, call_next):
 
 DATA = json.loads((Path(__file__).parent.parent / "telemetry.json").read_text())
 
-# Change these if your file uses different key names
 REGION_KEY, LATENCY_KEY, UPTIME_KEY = "region", "latency_ms", "uptime_pct"
 
 
@@ -43,8 +42,12 @@ def check(q: Query):
     for region in q.regions:
         rows = [r for r in DATA if r[REGION_KEY] == region]
         if not rows:
-            out[region] = {"avg_latency": None, "p95_latency": None,
-                           "avg_uptime": None, "breaches": 0}
+            out[region] = {
+                "avg_latency": None,
+                "p95_latency": None,
+                "avg_uptime": None,
+                "breaches": 0,
+            }
             continue
         lat = np.array([r[LATENCY_KEY] for r in rows], dtype=float)
         up = np.array([r[UPTIME_KEY] for r in rows], dtype=float)
@@ -54,4 +57,4 @@ def check(q: Query):
             "avg_uptime": float(up.mean()),
             "breaches": int((lat > q.threshold_ms).sum()),
         }
-        return out
+    return out
