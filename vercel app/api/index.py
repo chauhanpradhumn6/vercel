@@ -1,6 +1,6 @@
 import json
-import re
 import io
+import re
 import traceback
 from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
@@ -8,7 +8,6 @@ from pathlib import Path
 import numpy as np
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -34,23 +33,17 @@ async def add_cors(request: Request, call_next):
     return response
 
 
-# ---------- Latency endpoint (unchanged) ----------
-
 DATA = json.loads((Path(__file__).parent.parent / "telemetry.json").read_text())
 REGION_KEY, LATENCY_KEY, UPTIME_KEY = "region", "latency_ms", "uptime_pct"
 
 
-class Query(BaseModel):
-    regions: list[str]
-    threshold_ms: float
-
-
-@app.post("/")
-@app.post("/api")
-@app.post("/api/index")
-def check(q: Query):
+def run_latency(body: dict):
+    regions = body.get("regions")
+    threshold = body.get("threshold_ms")
+    if not isinstance(regions, list) or threshold is None:
+        return JSONResponse({"detail": "regions and threshold_ms required"}, status_code=422)
     out = {}
-    for region in q.regions:
+    for region in regions:
         rows = [r for r in DATA if r[REGION_KEY] == region]
         if not rows:
             out[region] = {"avg_latency": None, "p95_latency": None,
@@ -62,15 +55,9 @@ def check(q: Query):
             "avg_latency": float(lat.mean()),
             "p95_latency": float(np.percentile(lat, 95)),
             "avg_uptime": float(up.mean()),
-            "breaches": int((lat > q.threshold_ms).sum()),
+            "breaches": int((lat > float(threshold)).sum()),
         }
     return {"regions": out}
-
-
-# ---------- Code interpreter endpoint ----------
-
-class CodeRequest(BaseModel):
-    code: str
 
 
 def execute_python_code(code: str) -> dict:
@@ -80,25 +67,36 @@ def execute_python_code(code: str) -> dict:
         with redirect_stdout(buf), redirect_stderr(buf):
             exec(compile(code, "<string>", "exec"), env)
         return {"success": True, "output": buf.getvalue()}
-    except BaseException:
-        return {"success": False, "output": traceback.format_exc()}
+    except BaseException as e:
+        tb = e.__traceback__.tb_next if e.__traceback__ else None
+        output = (
+            "Traceback (most recent call last):\n"
+            + "".join(traceback.format_tb(tb))
+            + "".join(traceback.format_exception_only(type(e), e))
+        )
+        return {"success": False, "output": output}
 
 
-def find_error_lines(code: str, tb: str) -> list[int]:
-    """Read the line number of the failing line in the user's code
-    from the traceback (deepest frame inside the submitted code)."""
-    nums = re.findall(r'File "<string>", line (\d+)', tb)
-    if nums:
-        return [int(nums[-1])]
-    return []
-
-
-@app.post("/code-interpreter")
-def code_interpreter(req: CodeRequest):
-    result = execute_python_code(req.code)
+def run_code(code: str):
+    result = execute_python_code(code)
     if result["success"]:
         return {"error": [], "result": result["output"]}
-    return {
-        "error": find_error_lines(req.code, result["output"]),
-        "result": result["output"],
-    }
+    nums = re.findall(r'File "<string>", line (\d+)', result["output"])
+    return {"error": [int(nums[-1])] if nums else [], "result": result["output"]}
+
+
+@app.post("/")
+@app.post("/api")
+@app.post("/api/index")
+@app.post("/code-interpreter")
+@app.post("/api/code-interpreter")
+async def dispatch(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "invalid JSON"}, status_code=422)
+    if isinstance(body, dict) and "code" in body:
+        return run_code(body["code"])
+    if isinstance(body, dict):
+        return run_latency(body)
+    return JSONResponse({"detail": "invalid body"}, status_code=422)
